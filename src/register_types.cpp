@@ -2,6 +2,7 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
+#include "map_view.hpp"
 #include "test_node.hpp"
 
 using namespace godot;
@@ -11,6 +12,7 @@ void initialize_infantry_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	ClassDB::register_class<TestNode>();
+	ClassDB::register_class<MapView>();
 }
 
 void terminate_infantry_module(ModuleInitializationLevel p_level) {

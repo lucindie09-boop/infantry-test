@@ -8,6 +8,9 @@ bin/
 # SCons metadata
 .sconsign.dblite
 
+# Local probe playground
+.freebuff/
+
 # Compiled objects
 *.o
 *.obj
