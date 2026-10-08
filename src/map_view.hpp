@@ -1,6 +1,8 @@
 #ifndef INFANTRY_MAP_VIEW_HPP
 #define INFANTRY_MAP_VIEW_HPP
 
+#include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -35,6 +37,7 @@ class MapView : public Node2D {
 	Vector2 pan_offset_;
 	double battle_clock_ = 0.0;
 	bool panning_ = false;
+	bool battle_panel_open_ = false;
 	String status_;
 	int last_outcome_ = infantry::MOVE_OK;
 	int last_battle_outcome_ = infantry::BATTLE_ONGOING;
@@ -110,6 +113,22 @@ public:
 	float get_battle_side_strength_damage(int side) const;
 	String get_terrain_name(int column, int row) const;
 
+	// The battle bubble on the map, and the panel it opens.
+	bool is_battle_panel_open() const;
+	void set_battle_panel_open(bool open);
+	void toggle_battle_panel();
+	// Screen position of the bubble's centre.
+	Vector2 get_battle_bubble_position() const;
+
+	// Judged from the selected dude's point of view: the side with the greater
+	// share of its organisation left is the one currently winning.
+	int get_battle_local_side() const;
+	float get_battle_local_margin() const;
+	bool is_battle_local_winning() const;
+	// Hours until the first side breaks, or -1 when neither is being worn down.
+	int get_battle_estimated_hours() const;
+	String get_battle_verdict() const;
+
 	int get_last_outcome() const;
 	int get_last_battle_outcome() const;
 	String get_status() const;
@@ -132,6 +151,24 @@ private:
 	void report_outcome(infantry::MoveOutcome p_outcome, int p_mover);
 	void report_battle_end(int p_outcome);
 	void draw_bar(const Rect2 &p_rect, float p_ratio, const Color &p_color);
+
+	bool bubble_clicked(const Vector2 &p_screen_point) const;
+	Vector2 battle_bubble_centre() const;
+	Color battle_state_colour() const;
+	void draw_battle_bubble();
+	void draw_battle_panel(const Ref<Font> &p_font);
+	void draw_emphasis_text(const Ref<Font> &p_font, const Vector2 &p_position, const String &p_text,
+			float p_width, int p_size, const Color &p_colour, HorizontalAlignment p_alignment);
+
+	String side_label(int index) const;
+	String battle_estimate_line() const;
+	String panel_title() const;
+	String panel_subtitle() const;
+	String panel_hint() const;
+	String battle_column_header(int p_side) const;
+	String battle_column_subtitle(int p_side) const;
+	String battle_stat_label(int p_row) const;
+	String battle_stat_value(int p_side, int p_row) const;
 
 	String side_name(int index) const;
 	String cell_text(int index) const;
