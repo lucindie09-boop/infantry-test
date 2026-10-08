@@ -1,6 +1,9 @@
 #include "unit_model.hpp"
 
 #include <cmath>
+#include <cstdlib>
+
+#include "combat_defines.hpp"
 
 namespace infantry {
 
@@ -24,9 +27,10 @@ void UnitModel::reset(const MapModel &map) {
 		unit.value = value;
 		unit.column = value * grid + middle;
 		unit.row = middle;
-		unit.max_hp = DEFAULT_MAX_HP;
-		unit.hp = DEFAULT_MAX_HP;
-		unit.attack = DEFAULT_ATTACK;
+		unit.battalions = value == 0 ? infantry_division() : armoured_division();
+		unit.stats = build_division(unit.battalions);
+		unit.organisation = unit.stats.max_organisation;
+		unit.strength = unit.stats.max_strength;
 		unit.alive = true;
 
 		// The first two countries share a border, so their dudes start on the
@@ -126,17 +130,8 @@ MoveOutcome UnitModel::try_move(int index, int column, int row) {
 
 	const int target = unit_at(column, row);
 	if (target != -1 && target != index) {
-		Unit &defender = units_[static_cast<size_t>(target)];
-		defender.hp -= mover.attack;
-		if (defender.hp <= 0) {
-			defender.hp = 0;
-			defender.alive = false;
-			mover.column = column;
-			mover.row = row;
-			select_next_alive();
-			return MOVE_DESTROYED;
-		}
-		return MOVE_ATTACKED;
+		// Walking into the enemy starts a battle instead of a move.
+		return MOVE_ATTACK_STARTED;
 	}
 
 	mover.column = column;
@@ -150,6 +145,93 @@ MoveOutcome UnitModel::try_move_by(int index, int dcol, int drow) {
 	}
 	const Unit &unit = units_[static_cast<size_t>(index)];
 	return try_move(index, unit.column + dcol, unit.row + drow);
+}
+
+void UnitModel::apply_damage(int index, float p_org_damage, float p_strength_damage) {
+	if (!is_alive(index)) {
+		return;
+	}
+
+	Unit &unit = units_[static_cast<size_t>(index)];
+	unit.organisation -= p_org_damage;
+	unit.strength -= p_strength_damage;
+
+	if (unit.organisation < 0.0f) {
+		unit.organisation = 0.0f;
+	}
+	if (unit.strength <= 0.0f) {
+		unit.strength = 0.0f;
+		unit.organisation = 0.0f;
+		unit.alive = false;
+		select_next_alive();
+	}
+}
+
+void UnitModel::recover(int index, float p_hours) {
+	if (!is_alive(index) || p_hours <= 0.0f) {
+		return;
+	}
+
+	Unit &unit = units_[static_cast<size_t>(index)];
+
+	unit.organisation += defines::ORG_RECOVERY_PER_HOUR * p_hours;
+	if (unit.organisation > unit.stats.max_organisation) {
+		unit.organisation = unit.stats.max_organisation;
+	}
+
+	unit.strength += defines::STRENGTH_RECOVERY_PER_HOUR * p_hours;
+	if (unit.strength > unit.stats.max_strength) {
+		unit.strength = unit.stats.max_strength;
+	}
+}
+
+void UnitModel::retreat(int index, int away_from) {
+	if (!is_alive(index) || !is_valid(away_from)) {
+		return;
+	}
+
+	Unit &unit = units_[static_cast<size_t>(index)];
+	const Unit &enemy = units_[static_cast<size_t>(away_from)];
+
+	const int dcol = unit.column - enemy.column;
+	const int drow = unit.row - enemy.row;
+	const int step_col = dcol > 0 ? 1 : (dcol < 0 ? -1 : 0);
+	const int step_row = drow > 0 ? 1 : (drow < 0 ? -1 : 0);
+
+	// Withdraw straight away from the enemy along the dominant axis, then along
+	// the other axis, then sideways.
+	int candidates[4][2];
+	if (std::abs(dcol) >= std::abs(drow)) {
+		candidates[0][0] = step_col;
+		candidates[0][1] = 0;
+		candidates[1][0] = 0;
+		candidates[1][1] = step_row;
+		candidates[2][0] = 0;
+		candidates[2][1] = -step_row;
+		candidates[3][0] = -step_col;
+		candidates[3][1] = 0;
+	} else {
+		candidates[0][0] = 0;
+		candidates[0][1] = step_row;
+		candidates[1][0] = step_col;
+		candidates[1][1] = 0;
+		candidates[2][0] = -step_col;
+		candidates[2][1] = 0;
+		candidates[3][0] = 0;
+		candidates[3][1] = -step_row;
+	}
+
+	for (int i = 0; i < 4; ++i) {
+		const int column = unit.column + candidates[i][0];
+		const int row = unit.row + candidates[i][1];
+		if (!is_inside(column, row) || unit_at(column, row) != -1) {
+			continue;
+		}
+		unit.column = column;
+		unit.row = row;
+		return;
+	}
+	// Nowhere to fall back to: the division is pinned in place.
 }
 
 } // namespace infantry

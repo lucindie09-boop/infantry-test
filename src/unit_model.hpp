@@ -3,42 +3,46 @@
 
 #include <vector>
 
+#include "division_stats.hpp"
 #include "map_model.hpp"
 
 namespace infantry {
 
-// A little circular dude standing on exactly one province.
+// A little circular dude standing on exactly one province, fielding one
+// division's worth of stats.
 struct Unit {
 	int value = BLUE; // 0 = blue dude, 1 = red dude
 	int column = 0;   // column in the continuous province field
 	int row = 0;      // row in the continuous province field
-	int hp = 0;
-	int max_hp = 0;
-	int attack = 0; // damage dealt to the dude standing on the target province
+
+	// Two pools, as in the model this is inspired by: organisation is morale and
+	// strength is men and equipment. Breaking on organisation means withdrawing
+	// from the fight; running out of strength means being destroyed.
+	float organisation = 0.0f;
+	float strength = 0.0f;
+
+	DivisionStats stats;
+	BattalionCounts battalions;
 	bool alive = false;
 };
 
-// What came out of a step/attack attempt.
+// What came out of a movement attempt.
 enum MoveOutcome {
-	MOVE_OK = 0,           // stepped into an empty bordering province
-	MOVE_ATTACKED = 1,     // hit the enemy standing on a bordering province
-	MOVE_DESTROYED = 2,    // killed the enemy and took its province
-	MOVE_NOT_ADJACENT = 3, // the target province does not border the dude
-	MOVE_OFF_MAP = 4,      // the target province is outside the province field
-	MOVE_UNAVAILABLE = 5,  // no such dude, or that dude is dead
+	MOVE_OK = 0,              // stepped into an empty bordering province
+	MOVE_ATTACK_STARTED = 1,  // walked into the enemy, which starts a battle
+	MOVE_NOT_ADJACENT = 2,    // the target province does not border the dude
+	MOVE_OFF_MAP = 3,         // the target province is outside the province field
+	MOVE_UNAVAILABLE = 4,     // no such dude, or that dude is dead
+	MOVE_IN_BATTLE = 5,       // that dude is already committed to a battle
 };
 
-// The movable pieces on the map. The geometry is cached from the MapModel so
-// the movement and combat rules stay free of engine types.
 class UnitModel {
 public:
-	static const int DEFAULT_MAX_HP = 10;
-	static const int DEFAULT_ATTACK = 4;
-
 	UnitModel();
 
-	// Re-places one dude per country, full health, on the inner edge facing the
-	// neighbouring country across the shared border.
+	// Re-places one dude per country on the inner edge facing the neighbouring
+	// country, at full organisation and strength. Country 0 fields an infantry
+	// division, country 1 an armoured one.
 	void reset(const MapModel &map);
 
 	int get_count() const { return static_cast<int>(units_.size()); }
@@ -68,13 +72,23 @@ public:
 	// Index of the living dude standing on a province, or -1.
 	int unit_at(int column, int row) const;
 
-	// Steps a dude onto a bordering province, or attacks the enemy standing
-	// there. Returns what happened.
+	// Steps onto a bordering province, or triggers a battle when the enemy is
+	// standing there.
 	MoveOutcome try_move(int index, int column, int row);
 	MoveOutcome try_move_by(int index, int dcol, int drow);
 
+	// Both pools are damaged by the battle model.
+	void apply_damage(int index, float org_damage, float strength_damage);
+
+	// Regains organisation, and whatever strength growth is configured, over the
+	// given number of peaceful hours.
+	void recover(int index, float hours);
+
+	// Withdraws one province away from the given dude, or holds if hemmed in.
+	void retreat(int index, int away_from);
+
 private:
-	// Keeps a living dude selected after a kill.
+	// Keeps a living dude selected after a loss.
 	void select_next_alive();
 
 	std::vector<Unit> units_;

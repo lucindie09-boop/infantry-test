@@ -4,16 +4,19 @@
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
+#include "battle_model.hpp"
 #include "map_model.hpp"
 #include "unit_model.hpp"
 
 namespace godot {
 
-// Draws the flat, top-down map of the two countries plus the two dudes standing
-// on it, and owns the interactions:
+// Draws the flat, top-down map of the two countries, the two dudes standing on
+// it and, while it lasts, the battle between them.
+//
 //   middle mouse + drag : pan the map
 //   left click          : step the selected dude, or attack the dude standing
 //                         on a bordering province
@@ -21,16 +24,20 @@ namespace godot {
 //   arrows / WASD       : step the selected dude one province
 //
 // A dude may only move to a province that shares an edge with the one it holds.
-// Stepping onto the province held by the other dude attacks it instead.
+// Walking into the enemy starts a battle, which then runs hour by hour until
+// one side's organisation breaks.
 class MapView : public Node2D {
 	GDCLASS(MapView, Node2D)
 
 	infantry::MapModel model_;
 	infantry::UnitModel units_;
+	infantry::Battle battle_;
 	Vector2 pan_offset_;
+	double battle_clock_ = 0.0;
 	bool panning_ = false;
 	String status_;
 	int last_outcome_ = infantry::MOVE_OK;
+	int last_battle_outcome_ = infantry::BATTLE_ONGOING;
 
 protected:
 	static void _bind_methods();
@@ -39,11 +46,14 @@ public:
 	MapView();
 
 	void _ready() override;
+	void _process(double p_delta) override;
 	void _draw() override;
 	void _unhandled_input(const Ref<InputEvent> &p_event) override;
 
 	// Rebuilds the province layer of both countries and re-places the dudes.
 	void generate_map();
+	// Pans the map so that it sits in the middle of the viewport.
+	void center_map();
 
 	int get_country_count() const;
 	int get_province_count() const;
@@ -55,32 +65,56 @@ public:
 	int get_unit_column(int index) const;
 	int get_unit_row(int index) const;
 	Vector2 get_unit_position(int index) const;
-	int get_unit_hp(int index) const;
-	int get_unit_max_hp(int index) const;
-	int get_unit_attack(int index) const;
 	bool is_unit_alive(int index) const;
-	// Dude standing on the given province of the continuous field, or -1.
 	int get_unit_at_grid(int column, int row) const;
+
+	// The division this dude fields, and the pools its stats feed.
+	String get_unit_division(int index) const;
+	float get_unit_organisation(int index) const;
+	float get_unit_max_organisation(int index) const;
+	float get_unit_strength(int index) const;
+	float get_unit_max_strength(int index) const;
+	// Attack this dude would land on the given target, once the target's
+	// hardness decides how much of it is soft and how much is hard attack.
+	float get_unit_effective_attack(int index, int target) const;
+	// The whole stat block, plus the pools and the battalion counts.
+	Dictionary get_unit_stats(int index) const;
 
 	int get_selected_unit() const;
 	void set_selected_unit(int index);
 
-	// Steps a dude onto a bordering province, or attacks the enemy standing
-	// there. Returns an infantry::MoveOutcome value:
-	//   MOVE_OK 0, MOVE_ATTACKED 1, MOVE_DESTROYED 2,
-	//   MOVE_NOT_ADJACENT 3, MOVE_OFF_MAP 4, MOVE_UNAVAILABLE 5
+	// Steps a dude onto a bordering province, or starts a battle with the enemy
+	// standing there. Returns an infantry::MoveOutcome value.
 	int try_move_unit(int index, int column, int row);
 	int move_unit_by(int index, int dcol, int drow);
 
-	// Outcome of the last step/attack, and the line describing it on screen.
+	// Battles. start_battle refuses when the two dudes do not border each other.
+	bool start_battle(int attacker, int defender);
+	// Runs one battle hour by hand. The view calls this itself on a timer; it is
+	// exposed so a battle can also be stepped through deliberately.
+	int tick_battle();
+	// Advances peaceful hours, which restores the organisation of every dude that
+	// is not currently fighting.
+	void recover_units(float hours);
+	bool is_battle_active() const;
+	int get_battle_hours() const;
+	int get_battle_attacker() const;
+	int get_battle_defender() const;
+	String get_battle_terrain() const;
+	float get_battle_attack_modifier() const;
+	int get_battle_side_dice(int side) const;
+	float get_battle_side_hits(int side) const;
+	float get_battle_side_defended(int side) const;
+	float get_battle_side_undefended(int side) const;
+	float get_battle_side_org_damage(int side) const;
+	float get_battle_side_strength_damage(int side) const;
+	String get_terrain_name(int column, int row) const;
+
 	int get_last_outcome() const;
+	int get_last_battle_outcome() const;
 	String get_status() const;
 
 	bool is_panning() const;
-
-	// Pans the map so that it sits in the middle of the viewport.
-	void center_map();
-
 	Vector2 get_pan_offset() const;
 	void set_pan_offset(const Vector2 &offset);
 
@@ -93,12 +127,18 @@ private:
 	void handle_left_click(const Vector2 &p_map_point);
 	bool handle_key(int p_key);
 	bool step_selected(int p_dcol, int p_drow);
-	void report_outcome(infantry::MoveOutcome p_outcome, int p_mover, int p_target);
+	void move_or_attack(int index, int column, int row);
+	bool is_committed(int index) const;
+	void report_outcome(infantry::MoveOutcome p_outcome, int p_mover);
+	void report_battle_end(int p_outcome);
+	void draw_bar(const Rect2 &p_rect, float p_ratio, const Color &p_color);
 
 	String side_name(int index) const;
 	String cell_text(int index) const;
-	String health_text(int index) const;
-	String unit_line(int index) const;
+	String summary_line(int index) const;
+	String combat_line(int index) const;
+	String battle_header() const;
+	String battle_attack_line(int p_side) const;
 };
 
 } // namespace godot
