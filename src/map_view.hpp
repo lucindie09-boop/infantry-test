@@ -86,6 +86,11 @@ public:
 	int get_selected_unit() const;
 	void set_selected_unit(int index);
 
+	// Re-fields a dude with a different division template, at full organisation
+	// and strength. Refused while it is fighting, because a division's stats are
+	// fixed for the duration of a battle.
+	bool set_unit_template(int index, int infantry, int artillery, int anti_tank, int tanks);
+
 	// Steps a dude onto a bordering province, or starts a battle with the enemy
 	// standing there. Returns an infantry::MoveOutcome value.
 	int try_move_unit(int index, int column, int row);
@@ -105,10 +110,15 @@ public:
 	int get_battle_defender() const;
 	String get_battle_terrain() const;
 	float get_battle_attack_modifier() const;
-	int get_battle_side_dice(int side) const;
+	float get_battle_side_attacks(int side) const;
+	float get_battle_side_defences(int side) const;
+	float get_battle_side_blocked(int side) const;
+	float get_battle_side_unblocked(int side) const;
 	float get_battle_side_hits(int side) const;
-	float get_battle_side_defended(int side) const;
-	float get_battle_side_undefended(int side) const;
+	int get_battle_side_org_die(int side) const;
+	int get_battle_side_org_rolled(int side) const;
+	int get_battle_side_strength_rolled(int side) const;
+	bool get_battle_side_pierced(int side) const;
 	float get_battle_side_org_damage(int side) const;
 	float get_battle_side_strength_damage(int side) const;
 	String get_terrain_name(int column, int row) const;
@@ -125,6 +135,9 @@ public:
 	int get_battle_local_side() const;
 	float get_battle_local_margin() const;
 	bool is_battle_local_winning() const;
+	// How much of the fight is going the selected dude's way, 1 to 100, where 50
+	// is dead level.
+	int get_battle_local_score() const;
 	// Hours until the first side breaks, or -1 when neither is being worn down.
 	int get_battle_estimated_hours() const;
 	String get_battle_verdict() const;

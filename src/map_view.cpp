@@ -15,6 +15,9 @@
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstdlib>
+#include <ctime>
+
 using namespace godot;
 
 namespace {
@@ -55,7 +58,9 @@ String fmt1(float p_value) {
 const Color WIN_COLOR(0.32f, 0.80f, 0.36f, 1.0f);
 const Color LOSS_COLOR(0.92f, 0.30f, 0.24f, 1.0f);
 const Color EVEN_COLOR(0.95f, 0.74f, 0.26f, 1.0f);
-const Color BUBBLE_MARK(0.98f, 0.98f, 0.98f, 1.0f);
+// The bubble's own ink: dark, because the bubble is filled with a bright state
+// colour, and the score has to stay legible on all three of them.
+const Color BUBBLE_TEXT(0.04f, 0.05f, 0.08f, 1.0f);
 const Color PANEL_BACKGROUND(0.05f, 0.06f, 0.09f, 0.96f);
 const Color PANEL_BORDER(0.34f, 0.37f, 0.44f, 1.0f);
 const Color PANEL_TITLE(1.0f, 0.90f, 0.70f, 1.0f);
@@ -73,9 +78,23 @@ const float BUBBLE_VERTICAL_LIFT = 10.0f;
 // commits to calling it a win or a loss.
 const float BATTLE_WIN_MARGIN = 0.02f;
 
-// Panel layout: four stat rows per side, and a label column wide enough for the
-// longest label so every value lines up down the column.
-const int PANEL_STAT_ROWS = 4;
+// Panel layout: the y offset of every line down from the panel's top edge, six
+// stat rows per side, and a label column wide enough for the longest label so
+// that every value lines up down its column. The probe that verifies this
+// screen mirrors these numbers, so they live in one place.
+const float PANEL_WIDTH = 620.0f;
+const float PANEL_HEIGHT = 266.0f;
+const float PANEL_PAD = 16.0f;
+const float PANEL_TITLE_OFFSET = 28.0f;
+const float PANEL_SUBTITLE_OFFSET = 46.0f;
+const float PANEL_HEADER_OFFSET = 70.0f;
+const float PANEL_COLUMN_SUBTITLE_OFFSET = 88.0f;
+const float PANEL_FIRST_STAT_OFFSET = 106.0f;
+const float PANEL_STEP = 18.0f;
+const float PANEL_VERDICT_OFFSET = 220.0f;
+const float PANEL_ESTIMATE_OFFSET = 239.0f;
+const float PANEL_HINT_OFFSET = 257.0f;
+const int PANEL_STAT_ROWS = 6;
 // Width of a stat row's label column, in pixels, so every value in a column
 // starts at the same x.
 const float PANEL_LABEL_WIDTH = 118.0f;
@@ -119,12 +138,19 @@ void MapView::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_battle_defender"), &MapView::get_battle_defender);
 	ClassDB::bind_method(D_METHOD("get_battle_terrain"), &MapView::get_battle_terrain);
 	ClassDB::bind_method(D_METHOD("get_battle_attack_modifier"), &MapView::get_battle_attack_modifier);
-	ClassDB::bind_method(D_METHOD("get_battle_side_dice", "side"), &MapView::get_battle_side_dice);
+	ClassDB::bind_method(D_METHOD("get_battle_side_attacks", "side"), &MapView::get_battle_side_attacks);
+	ClassDB::bind_method(D_METHOD("get_battle_side_defences", "side"), &MapView::get_battle_side_defences);
+	ClassDB::bind_method(D_METHOD("get_battle_side_blocked", "side"), &MapView::get_battle_side_blocked);
+	ClassDB::bind_method(D_METHOD("get_battle_side_unblocked", "side"), &MapView::get_battle_side_unblocked);
 	ClassDB::bind_method(D_METHOD("get_battle_side_hits", "side"), &MapView::get_battle_side_hits);
-	ClassDB::bind_method(D_METHOD("get_battle_side_defended", "side"), &MapView::get_battle_side_defended);
-	ClassDB::bind_method(D_METHOD("get_battle_side_undefended", "side"), &MapView::get_battle_side_undefended);
+	ClassDB::bind_method(D_METHOD("get_battle_side_org_die", "side"), &MapView::get_battle_side_org_die);
+	ClassDB::bind_method(D_METHOD("get_battle_side_org_rolled", "side"), &MapView::get_battle_side_org_rolled);
+	ClassDB::bind_method(D_METHOD("get_battle_side_strength_rolled", "side"), &MapView::get_battle_side_strength_rolled);
+	ClassDB::bind_method(D_METHOD("get_battle_side_pierced", "side"), &MapView::get_battle_side_pierced);
 	ClassDB::bind_method(D_METHOD("get_battle_side_org_damage", "side"), &MapView::get_battle_side_org_damage);
 	ClassDB::bind_method(D_METHOD("get_battle_side_strength_damage", "side"), &MapView::get_battle_side_strength_damage);
+	ClassDB::bind_method(D_METHOD("set_unit_template", "index", "infantry", "artillery", "anti_tank", "tanks"),
+			&MapView::set_unit_template);
 	ClassDB::bind_method(D_METHOD("get_terrain_name", "column", "row"), &MapView::get_terrain_name);
 	ClassDB::bind_method(D_METHOD("is_battle_panel_open"), &MapView::is_battle_panel_open);
 	ClassDB::bind_method(D_METHOD("set_battle_panel_open", "open"), &MapView::set_battle_panel_open);
@@ -133,6 +159,7 @@ void MapView::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_battle_local_side"), &MapView::get_battle_local_side);
 	ClassDB::bind_method(D_METHOD("get_battle_local_margin"), &MapView::get_battle_local_margin);
 	ClassDB::bind_method(D_METHOD("is_battle_local_winning"), &MapView::is_battle_local_winning);
+	ClassDB::bind_method(D_METHOD("get_battle_local_score"), &MapView::get_battle_local_score);
 	ClassDB::bind_method(D_METHOD("get_battle_estimated_hours"), &MapView::get_battle_estimated_hours);
 	ClassDB::bind_method(D_METHOD("get_battle_verdict"), &MapView::get_battle_verdict);
 	ClassDB::bind_method(D_METHOD("get_last_outcome"), &MapView::get_last_outcome);
@@ -501,6 +528,7 @@ String MapView::summary_line(int index) const {
 	return side_label(index) + String("  -  ") + String(infantry::division_name(unit.battalions)) +
 			String("  -  ") + String::num_int64(unit.battalions.infantry) + String(" inf / ") +
 			String::num_int64(unit.battalions.artillery) + String(" arty / ") +
+			String::num_int64(unit.battalions.anti_tank) + String(" at / ") +
 			String::num_int64(unit.battalions.tanks) + String(" tk") +
 			String("  -  Organisation ") + fmt1(unit.organisation) + String(" / ") + fmt1(block.max_organisation) +
 			String("  -  Strength ") + fmt1(unit.strength) + String(" / ") + fmt1(block.max_strength);
@@ -541,14 +569,16 @@ String MapView::battle_attack_line(int p_side) const {
 	const int target = p_side == infantry::ATTACKER ? battle_.get_defender() : battle_.get_attacker();
 
 	return side_label(state.unit) + String("  ->  ") + side_label(target) +
-			String("  -  ") + fmt1(state.hits) + String(" Hits (Roll ") + String::num_int64(state.dice) + String(")") +
-			String("  -  ") + fmt1(state.hits_defended) + String(" Parried, ") +
-			fmt1(state.hits_undefended) + String(" Through") +
-			String("  -  Target: Organisation -") + fmt2(state.org_damage) +
-			String(", Strength -") + fmt2(state.strength_damage);
+			String("  -  Attacks ") + fmt1(state.attacks) +
+			String("  -  Blocked ") + fmt1(state.blocked) + String(", Unblocked ") + fmt1(state.unblocked) +
+			String("  -  Hits ") + fmt1(state.hits) +
+			String("  -  Org -") + fmt2(state.org_damage) + String(", Strength -") + fmt2(state.strength_damage) +
+			String(state.pierced ? "" : "  -  Unpierced");
 }
 
 void MapView::generate_map() {
+	// Dice are seeded once per map, so no two runs fight the same battle.
+	std::srand(static_cast<unsigned int>(std::time(nullptr)));
 	model_.generate();
 	units_.reset(model_);
 	battle_.stop();
@@ -672,6 +702,25 @@ void MapView::set_selected_unit(int index) {
 	queue_redraw();
 }
 
+bool MapView::set_unit_template(int index, int infantry_count, int artillery, int anti_tank, int tanks) {
+	if (!units_.is_alive(index) || is_committed(index)) {
+		return false;
+	}
+
+	infantry::BattalionCounts counts;
+	counts.infantry = infantry_count > 0 ? infantry_count : 0;
+	counts.artillery = artillery > 0 ? artillery : 0;
+	counts.anti_tank = anti_tank > 0 ? anti_tank : 0;
+	counts.tanks = tanks > 0 ? tanks : 0;
+	if (counts.total() <= 0) {
+		return false;
+	}
+
+	units_.set_template(index, counts);
+	queue_redraw();
+	return true;
+}
+
 int MapView::try_move_unit(int index, int column, int row) {
 	if (is_committed(index)) {
 		last_outcome_ = static_cast<int>(infantry::MOVE_IN_BATTLE);
@@ -775,20 +824,40 @@ float MapView::get_battle_attack_modifier() const {
 	return battle_.get_terrain().attack_modifier;
 }
 
-int MapView::get_battle_side_dice(int side) const {
-	return battle_.get_side(side).dice;
+float MapView::get_battle_side_attacks(int side) const {
+	return battle_.get_side(side).attacks;
+}
+
+float MapView::get_battle_side_defences(int side) const {
+	return battle_.get_side(side).target_defences;
+}
+
+float MapView::get_battle_side_blocked(int side) const {
+	return battle_.get_side(side).blocked;
+}
+
+float MapView::get_battle_side_unblocked(int side) const {
+	return battle_.get_side(side).unblocked;
 }
 
 float MapView::get_battle_side_hits(int side) const {
 	return battle_.get_side(side).hits;
 }
 
-float MapView::get_battle_side_defended(int side) const {
-	return battle_.get_side(side).hits_defended;
+int MapView::get_battle_side_org_die(int side) const {
+	return battle_.get_side(side).org_die;
 }
 
-float MapView::get_battle_side_undefended(int side) const {
-	return battle_.get_side(side).hits_undefended;
+int MapView::get_battle_side_org_rolled(int side) const {
+	return battle_.get_side(side).org_rolled;
+}
+
+int MapView::get_battle_side_strength_rolled(int side) const {
+	return battle_.get_side(side).strength_rolled;
+}
+
+bool MapView::get_battle_side_pierced(int side) const {
+	return battle_.get_side(side).pierced;
 }
 
 float MapView::get_battle_side_org_damage(int side) const {
@@ -878,6 +947,39 @@ bool MapView::is_battle_local_winning() const {
 	return get_battle_local_margin() > 0.0f;
 }
 
+int MapView::get_battle_local_score() const {
+	const int local = get_battle_local_side();
+	if (local < 0) {
+		return 50;
+	}
+
+	const int other = local == infantry::ATTACKER ? infantry::DEFENDER : infantry::ATTACKER;
+	const int mine_index = battle_.get_side(local).unit;
+	const int theirs_index = battle_.get_side(other).unit;
+	if (!units_.is_valid(mine_index) || !units_.is_valid(theirs_index)) {
+		return 50;
+	}
+
+	// The share of the two sides' remaining organisation that is mine: 50 when
+	// the two are level, over 50 while I am ahead, and it runs up towards 100 as
+	// the other side's morale runs out. This moves with the same quantity as the
+	// verdict and the bubble's colour, so the three never disagree.
+	const infantry::Unit &mine = units_.get(mine_index);
+	const infantry::Unit &theirs = units_.get(theirs_index);
+	const float mine_share = mine.stats.organisation_ratio(mine.organisation);
+	const float theirs_share = theirs.stats.organisation_ratio(theirs.organisation);
+	const float total = mine_share + theirs_share;
+	if (total <= 0.0f) {
+		return 50;
+	}
+
+	const int score = static_cast<int>(mine_share / total * 100.0f + 0.5f);
+	if (score < 1) {
+		return 1;
+	}
+	return score > 100 ? 100 : score;
+}
+
 Color MapView::battle_state_colour() const {
 	const float margin = get_battle_local_margin();
 	if (margin > BATTLE_WIN_MARGIN) {
@@ -906,7 +1008,9 @@ int MapView::get_battle_estimated_hours() const {
 		}
 
 		const infantry::Unit &unit = units_.get(state.unit);
-		const float remaining = unit.organisation - infantry::defines::ORG_RETREAT_THRESHOLD;
+		// A division fights at full effect until its organisation is gone, so its
+		// whole organisation is the run this estimates.
+		const float remaining = unit.organisation;
 		if (remaining <= 0.0f) {
 			return 0;
 		}
@@ -989,6 +1093,7 @@ String MapView::battle_column_subtitle(int p_side) const {
 	return side_label(index) + String("   ") + String(infantry::division_name(unit.battalions)) +
 			String("   (") + String::num_int64(unit.battalions.infantry) + String(" inf / ") +
 			String::num_int64(unit.battalions.artillery) + String(" arty / ") +
+			String::num_int64(unit.battalions.anti_tank) + String(" at / ") +
 			String::num_int64(unit.battalions.tanks) + String(" tk)");
 }
 
@@ -999,7 +1104,11 @@ String MapView::battle_stat_label(int p_row) const {
 		case 1:
 			return String("Strength");
 		case 2:
+			return String("Attacks");
+		case 3:
 			return String("Hits Landed");
+		case 4:
+			return String("Damage Done");
 		default:
 			return String("Parries With");
 	}
@@ -1014,20 +1123,27 @@ String MapView::battle_stat_value(int p_side, int p_row) const {
 	const infantry::Unit &unit = units_.get(state.unit);
 	const infantry::DivisionStats &block = unit.stats;
 
+	// Nothing has been thrown yet in the hour the battle opens.
+	if (p_row >= 2 && p_row <= 4 && state.org_die <= 0) {
+		return String("-");
+	}
+
 	switch (p_row) {
 		case 0:
 			return fmt1(unit.organisation) + String(" / ") + fmt1(block.max_organisation) +
 					String("   (") + fmt1(block.organisation_ratio(unit.organisation) * 100.0f) + String("%)");
 		case 1:
 			return fmt1(unit.strength) + String(" / ") + fmt1(block.max_strength);
-		case 2: {
-			const int other_side = p_side == infantry::ATTACKER ? infantry::DEFENDER : infantry::ATTACKER;
-			const infantry::Unit &other = units_.get(battle_.get_side(other_side).unit);
-			return fmt1(infantry::effective_attack(unit.stats, other.stats)) + String("   (Roll ") +
-					String::num_int64(state.dice) + String(")");
-		}
+		case 2:
+			return fmt1(state.attacks) + String("   Blocked ") + fmt1(state.blocked) + String(" / Past ") +
+					fmt1(state.unblocked);
+		case 3:
+			return fmt1(state.hits) + String("   from ") + fmt1(state.attacks) + String(" attacks, Org Die ") +
+					String::num_int64(state.org_die);
+		case 4:
+			return String("Org ") + fmt2(state.org_damage) + String("   Strength ") + fmt2(state.strength_damage);
 		default:
-			return String(p_side == infantry::ATTACKER ? "Breakthrough" : "Defence") + String("   ") +
+			return String(p_side == infantry::ATTACKER ? "Breakthrough " : "Defence ") +
 					fmt1(p_side == infantry::ATTACKER ? block.breakthrough : block.defence);
 	}
 }
@@ -1038,15 +1154,28 @@ void MapView::draw_battle_bubble() {
 	draw_circle(centre, BUBBLE_RADIUS, battle_state_colour());
 	draw_arc(centre, BUBBLE_RADIUS, 0.0f, TAU, 32, UNIT_OUTLINE, 2.0f, true);
 
-	// Crossed swords, so the marker reads as a battle rather than a unit.
-	draw_line(centre + Vector2(-4.0f, -4.0f), centre + Vector2(4.0f, 4.0f), BUBBLE_MARK, 2.0f, true);
-	draw_line(centre + Vector2(-4.0f, 4.0f), centre + Vector2(4.0f, -4.0f), BUBBLE_MARK, 2.0f, true);
+	// The score, 1 to 100, is the bubble's whole content: how much of the fight
+	// is going the selected dude's way. Dark ink, because the fill is one of
+	// three bright state colours.
+	const Ref<Font> font = ThemeDB::get_singleton()->get_fallback_font();
+	if (font.is_valid()) {
+		const String score = String::num_int64(get_battle_local_score());
+		const int size = score.length() > 2 ? 8 : 10;
+		draw_string(font, Vector2(centre.x - BUBBLE_RADIUS, centre.y + 3.5f), score, HORIZONTAL_ALIGNMENT_CENTER,
+				BUBBLE_RADIUS * 2.0f, size, BUBBLE_TEXT);
+	}
+
+	// Crossed swords straddling the top edge, so the badge still reads as a battle
+	// rather than a unit marker.
+	const Vector2 emblem = centre + Vector2(0.0f, -BUBBLE_RADIUS - 2.0f);
+	draw_line(emblem + Vector2(-3.0f, -3.0f), emblem + Vector2(3.0f, 3.0f), BUBBLE_TEXT, 2.0f, true);
+	draw_line(emblem + Vector2(-3.0f, 3.0f), emblem + Vector2(3.0f, -3.0f), BUBBLE_TEXT, 2.0f, true);
 }
 
 void MapView::draw_battle_panel(const Ref<Font> &p_font) {
 	const Vector2 viewport = get_viewport_rect().size;
-	const float width = 620.0f;
-	const float height = 258.0f;
+	const float width = PANEL_WIDTH;
+	const float height = PANEL_HEIGHT;
 	const Rect2 panel(Vector2(viewport.x - width - 16.0f, viewport.y - height - 16.0f), Vector2(width, height));
 
 	// A dark rim behind the panel body, so the map cannot bleed through the edge.
@@ -1054,22 +1183,21 @@ void MapView::draw_battle_panel(const Ref<Font> &p_font) {
 	draw_rect(Rect2(panel.position + Vector2(2.0f, 2.0f), panel.size - Vector2(4.0f, 4.0f)), PANEL_BACKGROUND, true);
 	draw_rect(panel, PANEL_BORDER, false, 2.0f);
 
-	const float left = panel.position.x + 16.0f;
-	const float inner = width - 32.0f;
+	const float top = panel.position.y;
+	const float right_edge = panel.position.x + width - PANEL_PAD;
+	const float left = panel.position.x + PANEL_PAD;
+	const float inner = width - PANEL_PAD * 2.0f;
 	const float column_width = inner * 0.5f - 8.0f;
 	const float attacker_x = left;
 	const float defender_x = left + inner * 0.5f + 6.0f;
-	const float step = 19.0f;
-	float y = panel.position.y + 30.0f;
 
 	// One heading block, centred, then a rule to separate it from the columns.
-	draw_emphasis_text(p_font, Vector2(left, y), panel_title(), inner, 16, PANEL_TITLE, HORIZONTAL_ALIGNMENT_CENTER);
-	y += step + 2.0f;
-	draw_string(p_font, Vector2(left, y), panel_subtitle(), HORIZONTAL_ALIGNMENT_CENTER, inner, 12, PANEL_DIM);
-	y += step + 8.0f;
-	draw_line(Vector2(left, y - 6.0f), Vector2(panel.position.x + width - 16.0f, y - 6.0f), PANEL_BORDER, 1.0f);
-
-	const float header_y = y;
+	draw_emphasis_text(p_font, Vector2(left, top + PANEL_TITLE_OFFSET), panel_title(), inner, 16, PANEL_TITLE,
+			HORIZONTAL_ALIGNMENT_CENTER);
+	draw_string(p_font, Vector2(left, top + PANEL_SUBTITLE_OFFSET), panel_subtitle(), HORIZONTAL_ALIGNMENT_CENTER,
+			inner, 12, PANEL_DIM);
+	draw_line(Vector2(left, top + PANEL_HEADER_OFFSET - 10.0f), Vector2(right_edge, top + PANEL_HEADER_OFFSET - 10.0f),
+			PANEL_BORDER, 1.0f);
 
 	// Column header in the side's own colour, so the two halves read apart.
 	for (int side = 0; side < 2; ++side) {
@@ -1077,43 +1205,46 @@ void MapView::draw_battle_panel(const Ref<Font> &p_font) {
 		const Color header_colour = units_.is_valid(index) && units_.get(index).value == infantry::BLUE
 				? BLUE_UNIT_COLOR
 				: RED_UNIT_COLOR;
-		draw_emphasis_text(p_font, Vector2(side == infantry::ATTACKER ? attacker_x : defender_x, y),
+		draw_emphasis_text(p_font, Vector2(side == infantry::ATTACKER ? attacker_x : defender_x,
+									  top + PANEL_HEADER_OFFSET),
 				battle_column_header(side), column_width, 13, header_colour, HORIZONTAL_ALIGNMENT_LEFT);
 	}
-	y += step + 2.0f;
 
 	for (int side = 0; side < 2; ++side) {
-		draw_string(p_font, Vector2(side == infantry::ATTACKER ? attacker_x : defender_x, y),
+		draw_string(p_font, Vector2(side == infantry::ATTACKER ? attacker_x : defender_x,
+						   top + PANEL_COLUMN_SUBTITLE_OFFSET),
 				battle_column_subtitle(side), HORIZONTAL_ALIGNMENT_LEFT, column_width, 12, PANEL_DIM);
 	}
-	y += step;
 
 	// Label and value are drawn separately, with the value always starting at the
 	// same offset, so the numbers line up down each column.
 	for (int row = 0; row < PANEL_STAT_ROWS; ++row) {
+		const float row_y = top + PANEL_FIRST_STAT_OFFSET + PANEL_STEP * static_cast<float>(row);
 		for (int side = 0; side < 2; ++side) {
 			const float column_x = side == infantry::ATTACKER ? attacker_x : defender_x;
-			draw_string(p_font, Vector2(column_x, y), battle_stat_label(row), HORIZONTAL_ALIGNMENT_LEFT,
+			draw_string(p_font, Vector2(column_x, row_y), battle_stat_label(row), HORIZONTAL_ALIGNMENT_LEFT,
 					PANEL_LABEL_WIDTH - 8.0f, 12, PANEL_DIM);
-			draw_string(p_font, Vector2(column_x + PANEL_LABEL_WIDTH, y), battle_stat_value(side, row),
+			draw_string(p_font, Vector2(column_x + PANEL_LABEL_WIDTH, row_y), battle_stat_value(side, row),
 					HORIZONTAL_ALIGNMENT_LEFT, column_width - PANEL_LABEL_WIDTH, 12, PANEL_TEXT);
 		}
-		y += step;
 	}
 
-	// A rule between the two columns, so two blocks of numbers do not read as one.
+	// A rule between the two columns, so two blocks of numbers do not read as one,
+	// and one across, to close the columns off from the verdict.
 	const float column_rule_x = defender_x - 6.0f;
-	draw_line(Vector2(column_rule_x, header_y - 12.0f), Vector2(column_rule_x, y - 8.0f), PANEL_BORDER, 1.0f);
-	draw_line(Vector2(left, y - 8.0f), Vector2(panel.position.x + width - 16.0f, y - 8.0f), PANEL_BORDER, 1.0f);
+	draw_line(Vector2(column_rule_x, top + PANEL_HEADER_OFFSET - 14.0f),
+			Vector2(column_rule_x, top + PANEL_VERDICT_OFFSET - 14.0f), PANEL_BORDER, 1.0f);
+	draw_line(Vector2(left, top + PANEL_VERDICT_OFFSET - 14.0f),
+			Vector2(right_edge, top + PANEL_VERDICT_OFFSET - 14.0f), PANEL_BORDER, 1.0f);
 
 	// The verdict and the estimate are the lines you actually read, so they get
 	// the centre line and the emphasis.
-	draw_emphasis_text(p_font, Vector2(left, y + 6.0f), get_battle_verdict(), inner, 14, battle_state_colour(),
-			HORIZONTAL_ALIGNMENT_CENTER);
-	y += step + 8.0f;
-	draw_string(p_font, Vector2(left, y), battle_estimate_line(), HORIZONTAL_ALIGNMENT_CENTER, inner, 13, PANEL_TEXT);
-	y += step;
-	draw_string(p_font, Vector2(left, y), panel_hint(), HORIZONTAL_ALIGNMENT_CENTER, inner, 11, HINT_COLOR);
+	draw_emphasis_text(p_font, Vector2(left, top + PANEL_VERDICT_OFFSET), get_battle_verdict(), inner, 14,
+			battle_state_colour(), HORIZONTAL_ALIGNMENT_CENTER);
+	draw_string(p_font, Vector2(left, top + PANEL_ESTIMATE_OFFSET), battle_estimate_line(),
+			HORIZONTAL_ALIGNMENT_CENTER, inner, 13, PANEL_TEXT);
+	draw_string(p_font, Vector2(left, top + PANEL_HINT_OFFSET), panel_hint(), HORIZONTAL_ALIGNMENT_CENTER, inner, 11,
+			HINT_COLOR);
 }
 
 int MapView::get_last_outcome() const {

@@ -15,8 +15,8 @@ enum BattleSide {
 
 enum BattleOutcome {
 	BATTLE_ONGOING = 0,
-	BATTLE_ATTACKER_WON = 1, // the defender's organisation broke and it withdrew
-	BATTLE_DEFENDER_WON = 2, // the attacker broke, or ran out of time
+	BATTLE_ATTACKER_WON = 1, // the defender's organisation ran out and it withdrew
+	BATTLE_DEFENDER_WON = 2, // the attacker's did, or the attack ran out of time
 };
 
 // The ground a battle is fought over. Only the attacker is penalised by it.
@@ -29,20 +29,25 @@ struct Terrain {
 // fights the same way.
 Terrain terrain_at(int p_column, int p_row);
 
-// What one side rolled and landed during the last hour of fighting.
+// What one side threw and landed during the last hour of fighting.
 struct BattleSideState {
 	int unit = -1;
-	int dice = 0;                  // 1..COMBAT_DICE damage roll
-	float hits = 0.0f;             // attack value that landed
-	float hits_defended = 0.0f;    // part of it the target parried
-	float hits_undefended = 0.0f;  // part of it the target could not parry
-	float org_damage = 0.0f;       // organisation taken off the target
-	float strength_damage = 0.0f;  // men and equipment taken off the target
+	float attacks = 0.0f;         // attacks thrown, after hardness, terrain and armour
+	float target_defences = 0.0f; // defences the target had to spend on them
+	float blocked = 0.0f;         // attacks a defence absorbed: one hit in ten
+	float unblocked = 0.0f;       // attacks past the defences: four hits in ten
+	float hits = 0.0f;            // how many of them landed
+	int org_die = 0;              // die rolled per hit for organisation damage
+	int str_die = 0;              // die rolled per hit for strength damage
+	int org_rolled = 0;           // the organisation dice total
+	int strength_rolled = 0;      // the strength dice total
+	bool pierced = true;          // whether these attacks beat the target's armour
+	float org_damage = 0.0f;      // organisation taken off the target
+	float strength_damage = 0.0f; // men and equipment taken off the target
 };
 
 // One battle between two dudes that hold bordering provinces. It ticks an hour
-// at a time; whichever side's organisation reaches the retreat threshold first
-// loses the province.
+// at a time; whichever side runs out of organisation first loses the province.
 class Battle {
 public:
 	Battle();
@@ -61,7 +66,7 @@ public:
 	BattleOutcome tick(UnitModel &p_units);
 
 private:
-	void roll(BattleSide p_side, int p_target, const UnitModel &p_units);
+	void resolve(BattleSide p_side, int p_target, const UnitModel &p_units);
 
 	bool active_ = false;
 	int attacker_ = -1;

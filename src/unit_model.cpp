@@ -147,6 +147,18 @@ MoveOutcome UnitModel::try_move_by(int index, int dcol, int drow) {
 	return try_move(index, unit.column + dcol, unit.row + drow);
 }
 
+void UnitModel::set_template(int index, const BattalionCounts &p_counts) {
+	if (!is_alive(index)) {
+		return;
+	}
+
+	Unit &unit = units_[static_cast<size_t>(index)];
+	unit.battalions = p_counts;
+	unit.stats = build_division(p_counts);
+	unit.organisation = unit.stats.max_organisation;
+	unit.strength = unit.stats.max_strength;
+}
+
 void UnitModel::apply_damage(int index, float p_org_damage, float p_strength_damage) {
 	if (!is_alive(index)) {
 		return;
@@ -174,7 +186,9 @@ void UnitModel::recover(int index, float p_hours) {
 
 	Unit &unit = units_[static_cast<size_t>(index)];
 
-	unit.organisation += defines::ORG_RECOVERY_PER_HOUR * p_hours;
+	// Morale comes back as a share of the division's own maximum, so a small
+	// division does not recover faster than a large one.
+	unit.organisation += unit.stats.max_organisation * defines::ORG_RECOVERY_SHARE_PER_HOUR * p_hours;
 	if (unit.organisation > unit.stats.max_organisation) {
 		unit.organisation = unit.stats.max_organisation;
 	}

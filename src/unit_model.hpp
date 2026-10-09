@@ -77,6 +77,10 @@ public:
 	MoveOutcome try_move(int index, int column, int row);
 	MoveOutcome try_move_by(int index, int dcol, int drow);
 
+	// Re-fields a dude with a new template, as a fresh division at full
+	// organisation and strength.
+	void set_template(int index, const BattalionCounts &p_counts);
+
 	// Both pools are damaged by the battle model.
 	void apply_damage(int index, float org_damage, float strength_damage);
 

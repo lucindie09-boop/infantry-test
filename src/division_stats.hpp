@@ -28,8 +28,9 @@ struct DivisionStats {
 struct BattalionCounts {
 	int infantry = 0;
 	int artillery = 0;
+	int anti_tank = 0;
 	int tanks = 0;
-	int total() const { return infantry + artillery + tanks; }
+	int total() const { return infantry + artillery + anti_tank + tanks; }
 };
 
 // Builds a division's stat block from its composition: strength, attacks,
@@ -41,6 +42,14 @@ DivisionStats build_division(const BattalionCounts &p_counts);
 // unhardened part of the target, hard attack the hardened part. This is why
 // soft attack alone struggles against armour.
 float effective_attack(const DivisionStats &p_attacker, const DivisionStats &p_target);
+
+// Whether an attack can beat the target's armour. If it cannot, most of the
+// attack is wasted: half the attacks are used and each lands for half damage.
+bool pierces(const DivisionStats &p_attacker, const DivisionStats &p_target);
+
+// Damage output scales with how much of the division is still standing, rounded
+// down to whole steps of FIGHTING_STRENGTH_STEP.
+float fighting_strength(const DivisionStats &p_stats, float p_strength);
 
 // A little catalogue so the two dudes can field different divisions.
 BattalionCounts infantry_division();
